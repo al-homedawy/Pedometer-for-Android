@@ -1,0 +1,451 @@
+package com.example.lab3_201_2;
+
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+
+import com.example.lab3_201_2.LineGraphView;
+
+import android.support.v7.app.ActionBarActivity;
+import android.support.v4.app.Fragment;
+import android.os.Bundle;
+import android.view.ContextMenu;
+import android.view.ContextMenu.ContextMenuInfo;
+import android.view.LayoutInflater;
+import android.view.Menu;
+import android.view.MenuItem;
+import android.view.View;
+import android.view.View.OnClickListener;
+import android.view.ViewGroup;
+import android.widget.Button;
+import android.widget.LinearLayout;
+import android.widget.TextView;
+import android.app.AlertDialog;
+import android.hardware.Sensor;
+import android.hardware.SensorEvent;
+import android.hardware.SensorEventListener;
+import android.hardware.SensorManager;
+
+class StepOrientation implements SensorEventListener {
+	
+	// Displacement Information.
+	private TextView bearing = null;
+	private TextView North = null;
+	private TextView East = null;
+	
+	// Multipliers for both axe's
+	private float vertMultiply = 1.0f;
+	private float horizMultiply = 1.0f;
+	
+	// Displacement Information
+	static float NorthCounter = 0.0f;
+	static float EastCounter = 0.0f;
+	
+	// Current heading 
+	static float currentHeading = 0.0f;
+	
+	// Orientation Data
+	private float mGravity [] = null;
+	private float mGeomagnetic [] = null;
+	
+	// Steps
+	static int steps;
+	private TextView stepView = null;
+	
+	// Go through with a step
+	boolean stepSuccess = false;
+	
+	// Graph
+	private LineGraphView graph = null;
+	
+	// Number of steps to be recorded per sequence
+	private final int maxPoints = 75;
+		
+	// This list keeps track of all our 'Y'
+	// values.
+	private ArrayList<Float> listY = new ArrayList<Float> ();
+	private ArrayList<Float> listZ = new ArrayList<Float> ();
+	
+	private String locateBearing ( float bearing )
+	{
+		if ( bearing < 90 )
+		{
+			if ( bearing < ( 90 - 80 ) )
+				return "N";
+			else if ( bearing > (90 - 10) )
+				return "E";
+			else if ( bearing < (90 - 45) )
+				return "NE";
+			else if ( bearing > (90 - 45) )
+				return "ENE";
+		}
+		else if ( bearing < 180 )
+		{
+			if ( bearing < ( 180 - 80 ) )
+				return "E";
+			else if ( bearing > (180 - 10) )
+				return "S";
+			else if ( bearing < (180 - 45) )
+				return "ESE";
+			else if ( bearing > (180 - 45) )
+				return "SE";
+		}
+		else if ( bearing < 270 )
+		{
+			if ( bearing < ( 270 - 80 ) )
+				return "S";
+			else if ( bearing > (270 - 10) )
+				return "W";
+			else if ( bearing < (270 - 45) )
+				return "SSW";
+			else if ( bearing > (270 - 45) )
+				return "WSW";
+		}
+		else 
+		{
+			if ( bearing < ( 360 - 80 ) )
+				return "W";
+			else if ( bearing > (360 - 10) )
+				return "N";
+			else if ( bearing < (360 - 45) )
+				return "WNW";
+			else if ( bearing > (360 - 45) )
+				return "NWW";
+		}
+		
+		// Something wrong happened?
+		return "";
+	}
+		
+	// Use our sensor value to determine if
+	// the user has made a step.
+	// Record all the Y values from the beginning
+	// of the wave (Y=0) to the end of the wave (Y=0).
+	private boolean checkForStep ( float[] values )
+	{		
+		// The concept of this method is to collect 
+		// 'maxPoints' number of elements then analyze that
+		// data to see if there was an occurrence of a step.
+		if ( listY.size () < maxPoints )
+		{
+			listY.add(values [1]);
+			listZ.add(values [2]);
+		}
+		// After we've collected data we analyze it
+		else
+		{
+			// Obtain the extremities in the graph for Y
+			float maxY = Collections.max ( listY );
+			float minY = Collections.min ( listY );
+			
+			// Obtain the extremities in the graph for Y
+			float maxZ = Collections.max ( listZ );
+			float minZ = Collections.min ( listZ );
+			
+			// Clear the data after we've recorded the
+			// extremities to prepare for the next set 
+			// of data.
+			listY.clear ();
+			listZ.clear ();
+			
+			// This check ensures there is sufficient movement in the Y
+			// direction.
+			boolean YStep = ( maxY - minY ) >= 1.2 ? true : false;
+			
+			// This check ensures there is a significant step in the Z
+			// direction.
+			boolean ZStep = ( maxZ - minZ ) >= 2.5 ? true : false;
+			
+			if ( YStep && ZStep )			
+				// Count the step
+				return true;
+		}
+						
+		return false;
+	}
+	
+	public void onAccuracyChanged ( Sensor sensor, int accuracy )
+	{
+		// We don't need this for
+		// now.
+	}
+	
+	public void onSensorChanged(SensorEvent event) {		
+		if ( event.sensor.getType() == Sensor.TYPE_ACCELEROMETER )
+		{			
+			// Compute the orientation
+			if ( mGravity == null )
+				mGravity = event.values;
+			
+			// Pass the data received from the sensor
+			// to our 'checkForStep' func.
+			if ( checkForStep ( event.values ) )
+			{
+				++steps;
+				stepSuccess = true;
+			}
+			
+			// Plot the current points in the graph.
+			graph.addPoint(event.values);		
+		}
+		
+		// Update Orientation.
+		if ( event.sensor.getType() == Sensor.TYPE_MAGNETIC_FIELD )
+			if ( mGeomagnetic == null )
+				mGeomagnetic = event.values;
+					
+		if ( mGravity != null && mGeomagnetic != null )
+		{
+			float R[] = new float [9];
+			float I[] = new float [9];
+							
+			if ( SensorManager.getRotationMatrix(R, I, mGravity, mGeomagnetic) )
+			{
+				// Obtain the orientation
+				float orientation [] = new float [3];
+				SensorManager.getOrientation ( R, orientation );
+				
+				// Obtain heading in degrees.
+				float heading = (float) Math.toDegrees ( 
+								( (orientation [0] < 0) ? (2 * Math.PI + orientation [0]) : 
+														orientation [0] ) );
+				
+				if ( currentHeading == 0.0f )
+					currentHeading = heading;
+				
+				// Adjust the displacement respectively.
+				if ( stepSuccess )
+				{
+					// Adjust the current step heading.
+					currentHeading = heading;
+					
+					// Adjust the heading for its quadrant.
+					if ( currentHeading < 90 )
+					{
+						vertMultiply = 1.0f;
+						horizMultiply = 1.0f;
+					}
+					else if ( currentHeading < 180 )
+					{
+						vertMultiply = -1.0f;
+						horizMultiply = 1.0f;
+					}
+					else if ( currentHeading < 270 )
+					{
+						vertMultiply = -1.0f;
+						horizMultiply = -1.0f;
+					}
+					else
+					{
+						vertMultiply = 1.0f;
+						horizMultiply = -1.0f;
+					}
+					
+					// Adjust the heading.
+					if ( currentHeading < 90 )
+					{
+						// Adjust the counters
+						NorthCounter += Math.abs ( Math.sin ( currentHeading ) ) * vertMultiply;
+						EastCounter += Math.abs ( Math.cos ( currentHeading ) ) * horizMultiply;
+					}
+					else 
+					{
+						// Adjust the counters
+						NorthCounter += Math.abs ( Math.cos ( currentHeading ) ) * vertMultiply;
+						EastCounter += Math.abs ( Math.sin ( currentHeading ) ) * horizMultiply;
+					}
+					
+					// Reset 'stepSuccess'
+					stepSuccess = false;
+				}
+					
+				// Reset orientation data
+				mGravity = null;
+				mGeomagnetic = null;
+			}
+		}
+		
+		// Update the step counter view.
+		stepView.setText(String.format("steps: %d", steps));
+		
+		// Update the current heading view.
+		bearing.setText(String.format("Current bearing: %.2f deg (%s)", currentHeading, 
+																		locateBearing ( currentHeading ) ) );
+		
+		// Update the current heading view.
+		North.setText(String.format("North: %.2f deg", NorthCounter));
+				
+		// Update the current heading view.
+		East.setText(String.format("East: %.2f deg", EastCounter));
+	}
+	
+	@SuppressWarnings("static-access")
+	public StepOrientation ( LineGraphView graph, TextView stepView, TextView North, 
+																	 TextView East,
+																	 TextView currentHeading )
+	{
+		// Initialize our variables
+		this.North = North;
+		this.East = East;
+		this.bearing = currentHeading;
+		this.graph = graph;
+		this.stepView = stepView;
+		steps = 0;
+	}
+}
+
+public class MainActivity extends ActionBarActivity 
+{
+	static MapView mapView;
+	
+	// Main-Entry point.
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+    	
+    	// Setup the application
+    	super.onCreate(savedInstanceState);
+    	setContentView(R.layout.activity_main);
+    	
+    	// Create an instance of MapView
+        mapView = new MapView ( getApplicationContext(), 800, 500, 30, 30 );
+        
+    	// Register the menu for our map
+    	registerForContextMenu ( mapView );
+    	
+    	// Load the map
+        NavigationalMap map = MapLoader.loadMap ( getExternalFilesDir ( null ), 
+        										  "Lab-room-peninsula.svg" );
+        mapView.setMap ( map );
+                
+        if (savedInstanceState == null) {
+            getSupportFragmentManager().beginTransaction()
+                    .add(R.id.container, new PlaceholderFragment())
+                    .commit();
+        }
+    }
+    
+    @Override
+    public void onCreateContextMenu(ContextMenu menu, View v, ContextMenuInfo menuInfo) 
+    {
+    	super.onCreateContextMenu(menu, v, menuInfo);
+    	mapView.onCreateContextMenu(menu, v, menuInfo);
+    }
+    
+    @Override
+    public boolean onContextItemSelected(MenuItem item) {
+    	return super.onContextItemSelected(item) || mapView.onContextItemSelected (item);
+    }
+
+    @Override
+    public boolean onCreateOptionsMenu(Menu menu) {
+        // Inflate the menu; this adds items to the action bar if it is present.
+        getMenuInflater().inflate(R.menu.main, menu);
+        return true;
+    }
+
+    @Override
+    public boolean onOptionsItemSelected(MenuItem item) {
+        // Handle action bar item clicks here. The action bar will
+        // automatically handle clicks on the Home/Up button, so long
+        // as you specify a parent activity in AndroidManifest.xml.
+        int id = item.getItemId();
+        if (id == R.id.action_settings) {
+            return true;
+        }
+        return super.onOptionsItemSelected(item);
+    }
+
+    /**
+     * A placeholder fragment containing a simple view.
+     */
+    public static class PlaceholderFragment extends Fragment {
+
+        public PlaceholderFragment() {
+        	
+        }
+
+        @Override
+        public View onCreateView(LayoutInflater inflater, ViewGroup container,
+                Bundle savedInstanceState) {
+        	
+        	// Create an instance to our view
+            View rootView = inflater.inflate(R.layout.fragment_main, container, false);
+            
+            // Update the header
+            TextView Credits = (TextView) rootView.findViewById (R.id.credits);
+            Credits.setText("Group 2, Section 201 -Lab 3");
+            
+            // Obtain an instance to our layout and set orientation
+            LinearLayout layout = (LinearLayout) rootView.findViewById ( R.id.layout );
+            layout.setOrientation(LinearLayout.VERTICAL);
+            
+            // Create an instance of a LineGraphView
+            LineGraphView graph = new LineGraphView ( rootView.getContext (), 
+					100, 
+					Arrays.asList ( "x", "y", "z" ) );
+                        
+            // Create the header for steps
+            TextView stepHeader = new TextView ( rootView.getContext () );
+            stepHeader.setText ( "---Steps Taken---" );
+            registerForContextMenu(mapView);
+            
+            // Create out step counter view
+            TextView stepCounter = new TextView ( rootView.getContext() );
+            stepCounter.setText( "steps: 0" );
+            
+            // Create the header for displacement
+            TextView displacementHeader = new TextView ( rootView.getContext () );
+            displacementHeader.setText ( "---displacement (steps)---" );
+            
+            // Create displacement information
+            TextView currentHeading = new TextView ( rootView.getContext () );
+            TextView North = new TextView ( rootView.getContext () );
+            TextView East = new TextView ( rootView.getContext () );
+            
+            // Create a reset button
+            Button Reset = new Button ( rootView.getContext () );
+            Reset.setText("Clear");
+            Reset.setOnClickListener( new OnClickListener () {
+            	public void onClick ( View v )
+            	{
+            		// Rest information
+            		StepOrientation.steps = 0;
+            		StepOrientation.currentHeading = 0;
+            		StepOrientation.NorthCounter = 0;
+            		StepOrientation.EastCounter = 0;
+            	}
+            });
+            
+            // Add our views to the layout
+            layout.addView( mapView );
+            layout.addView(stepHeader);
+            layout.addView(stepCounter);
+            layout.addView(displacementHeader);
+            layout.addView(currentHeading);
+            layout.addView(North);
+            layout.addView(East);
+            layout.addView(Reset);
+            
+            // Create an instance of our event callback's
+            SensorEventListener stepAndHeading = new StepOrientation ( graph, stepCounter, 
+            														 North, East, currentHeading );
+            
+            // Request permission to manipulate sensors
+            SensorManager sensorManager = (SensorManager) 
+            		rootView.getContext().getSystemService ( SENSOR_SERVICE );
+            
+            // Create a sensor to handle the accelerometer
+            Sensor accel = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
+            Sensor magnetic = sensorManager.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD);
+            
+            // Register our sensor
+            sensorManager.registerListener(stepAndHeading, accel, 
+            		SensorManager.SENSOR_DELAY_FASTEST);
+            sensorManager.registerListener(stepAndHeading, magnetic,
+            		SensorManager.SENSOR_DELAY_FASTEST);
+            
+            // Return
+            return rootView;
+        }
+    }
+}
